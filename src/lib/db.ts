@@ -1,14 +1,12 @@
 "use server";
 
-import { Assignment, Spot, SpotStatus } from "@/types/db.types";
+import { Assignment, Spot, SpotStatus, User } from "@/types/db.types";
 import { neon } from "@neondatabase/serverless";
-import { User } from "firebase/auth";
 import { DATABASE_URL } from "./env";
 
-// Create a singleton SQL client
+// Create a cached SQL client that is being initialized on the first call and then reused
 const sql = neon(DATABASE_URL);
 
-// At the top of the file, after imports
 const logPrefix = "[DB]";
 
 /**

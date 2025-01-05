@@ -34,3 +34,39 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Testing
+
+This project uses Jest and React Testing Library for testing. To run tests:
+
+```bash
+# Run tests once
+npm test
+# Run tests in watch mode
+npm run test:watch
+# Run tests in CI mode
+npm run test:ci
+```
+
+### Writing Tests
+
+Tests are located in `__tests__` directories next to the components they test. Follow these conventions:
+
+- Name test files as `ComponentName.test.tsx`
+- Use React Testing Library best practices
+- Write meaningful test descriptions
+
+## CI/CD
+
+This project uses GitHub Actions for continuous integration and deployment:
+
+- Tests are run on every push and pull request
+- Successful builds on the main branch are automatically deployed to Vercel
+
+To set up deployment:
+
+1. Create a Vercel project and link it to your repository
+2. Add the following secrets to your GitHub repository:
+   - `VERCEL_TOKEN`
+   - `VERCEL_ORG_ID`
+   - `VERCEL_PROJECT_ID`

@@ -3,6 +3,7 @@
 import { getSessionUser } from "@/lib/api-client";
 import { User as DbUser } from "@/types/db.types";
 import {
+  UserProvider as Auth0UserProvider,
   useUser as useAuth0User,
   UserProfile,
 } from "@auth0/nextjs-auth0/client";
@@ -15,7 +16,7 @@ interface UserContextType {
   error: Error | null;
 }
 
-const UserContext = createContext<UserContextType>({
+export const UserContext = createContext<UserContextType>({
   dbUser: null,
   auth0User: null,
   isLoading: true,
@@ -26,7 +27,7 @@ export function useUser() {
   return useContext(UserContext);
 }
 
-export function UserProvider({ children }: { children: React.ReactNode }) {
+function UserProvider({ children }: { children: React.ReactNode }) {
   const { user: auth0User, isLoading: auth0Loading } = useAuth0User();
   const [dbUser, setDbUser] = useState<DbUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -73,3 +74,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     </UserContext.Provider>
   );
 }
+
+export function UserProviderWrapper({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <Auth0UserProvider>
+      <UserProvider>{children}</UserProvider>
+    </Auth0UserProvider>
+  );
+}
+
+export default UserProviderWrapper;
