@@ -2,9 +2,10 @@ name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   test-and-build:
@@ -12,18 +13,45 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        if: success()
 
       - name: Setup Node.js
+        if: success()
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
+        if: success()
         run: npm ci
 
       - name: Run tests
+        if: success()
         run: npm run test:ci
 
       - name: Build
+        if: success()
         run: npm run build
+
+      - name: Deploy to Vercel
+        if: success() && (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev'))
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npm install --global vercel
+          if [[ ${{ github.event_name }} == 'push' && ${{ github.ref }} == 'refs/heads/main' ]]; then
+            env="production"
+            env_opt="--prod"
+          elif [[ ${{ github.event_name }} == 'push' && ${{ github.ref }} == 'refs/heads/dev' ]]; then
+            env="development"
+          else
+            env="preview"
+          fi
+          token_opt="--token=$VERCEL_TOKEN"
+          vercel pull --yes --environment=$env $token_opt
+          vercel build $env_opt $token_opt
+          vercel deploy $env_opt $token_opt
