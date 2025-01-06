@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack -p 3001",
+    "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "next lint",
@@ -12,16 +12,16 @@
     "test:ci": "jest --ci --coverage"
   },
   "dependencies": {
-    "@auth0/nextjs-auth0": "^3",
+    "@auth0/nextjs-auth0": "^3.5.0",
     "@emotion/react": "^11",
     "@emotion/styled": "^11",
     "@mui/icons-material": "^6",
     "@mui/material": "^6",
     "@neondatabase/serverless": "^0.10.4",
     "dotenv": "^16",
-    "next": "^15",
-    "react": "^19",
-    "react-dom": "^19"
+    "next": "^14",
+    "react": "^18",
+    "react-dom": "^18"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -29,8 +29,8 @@
     "@testing-library/react": "^16",
     "@types/jest": "^29",
     "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
     "eslint": "^9",
     "eslint-config-next": "^15",
     "jest": "^29",

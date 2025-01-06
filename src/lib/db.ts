@@ -9,6 +9,26 @@ const sql = neon(DATABASE_URL);
 
 const logPrefix = "[DB]";
 
+let isInitialized = false;
+
+/**
+ * Ensures database is initialized. Should be called during app startup.
+ * Safe to call multiple times - will only initialize once.
+ */
+export async function ensureInitialized() {
+  if (isInitialized) return;
+
+  console.log(`${logPrefix} Initializing database...`);
+  try {
+    await initializeDatabase();
+    isInitialized = true;
+    console.log(`${logPrefix} Database initialized successfully`);
+  } catch (error) {
+    console.error(`${logPrefix} Failed to initialize database:`, error);
+    throw error;
+  }
+}
+
 /**
  * Creates a new user in the system
  * @param email User's email address (unique identifier)
@@ -116,6 +136,23 @@ export async function getUsers(): Promise<User[]> {
   } catch (error) {
     console.error("Error fetching users:", error);
     throw new Error("Failed to fetch users");
+  }
+}
+
+/**
+ * Checks if there are any users in the system
+ * @returns Promise that resolves to true if there are users, false if empty
+ * @throws Error if checking users fails
+ */
+export async function hasUsers(): Promise<boolean> {
+  try {
+    const [result] = await sql`
+      SELECT EXISTS(SELECT 1 FROM users LIMIT 1) as has_users;
+    `;
+    return result.has_users;
+  } catch (error) {
+    console.error("Error checking if users exist:", error);
+    throw new Error("Failed to check if users exist");
   }
 }
 
