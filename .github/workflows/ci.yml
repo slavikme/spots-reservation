@@ -34,8 +34,22 @@ jobs:
         if: success()
         run: npm run build
 
+  deploy:
+    runs-on: ubuntu-latest
+    # Only run deploy job if test-and-build succeeds and we're on the right branches/events
+    needs: test-and-build
+    if: success() && (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev'))
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
       - name: Deploy to Vercel
-        if: success() && (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev'))
         continue-on-error: true
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
