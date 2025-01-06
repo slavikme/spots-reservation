@@ -15,13 +15,13 @@ export const DATABASE_URL =
  * The base URL for the Auth0 authentication.
  * This is used as a callback URL for the Auth0 authentication.
  */
-export const AUTH0_BASE_URL =
-  // Use custom environment variable if set
+export const AUTH0_BASE_URL = (
   process.env.AUTH0_BASE_URL ||
   // If running in Vercel, use the VERCEL_URL environment variable
   process.env.VERCEL_URL ||
   // Otherwise, fallback to local environment
-  "http://localhost:3001";
+  "http://localhost:3001"
+).replace(/^(?!https?:\/\/)/g, "https://");
 
 /**
  * The secret for the Auth0 authentication.
