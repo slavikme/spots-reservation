@@ -4,7 +4,7 @@ import { Assignment, Spot, SpotStatus, User } from "@/types/db.types";
 import { neon } from "@neondatabase/serverless";
 import { DATABASE_URL } from "./env";
 
-// Create a cached SQL client that is being initialized on the first call and then reused
+// Create a singleton SQL client
 const sql = neon(DATABASE_URL);
 
 const logPrefix = "[DB]";
