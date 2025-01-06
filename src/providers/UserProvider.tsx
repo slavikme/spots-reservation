@@ -53,13 +53,7 @@ function UserProvider({ children }: { children: React.ReactNode }) {
     if (!auth0Loading) {
       fetchDbUser();
     }
-  }, [
-    auth0User?.sub,
-    auth0User?.email,
-    auth0User?.name,
-    auth0User?.picture,
-    auth0Loading,
-  ]);
+  }, [auth0User?.sub, auth0Loading]);
 
   return (
     <UserContext.Provider

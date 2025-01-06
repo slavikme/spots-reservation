@@ -2,6 +2,8 @@ import auth0 from "@/lib/auth0";
 import * as db from "@/lib/db";
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/user
  * Gets the currently authenticated user
@@ -10,7 +12,6 @@ import { NextResponse } from "next/server";
  * - 404 if user not found in database
  * - 500 if server error occurs
  */
-
 export async function GET() {
   try {
     console.log("[API] Getting session user");
