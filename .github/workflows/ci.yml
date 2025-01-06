@@ -7,9 +7,16 @@ on:
   pull_request:
     branches: [main, dev]
 
+# Add default permissions at workflow level (most restrictive)
+permissions:
+  contents: read
+
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    # This job only needs read permissions
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +54,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: test-and-build
+    # Deploy job needs write permissions for deployments
+    permissions:
+      contents: read
+      deployments: write
     if: success() && (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev'))
 
     steps:
