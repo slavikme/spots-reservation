@@ -1,7 +1,7 @@
 export async function register() {
   console.log("Instrumentation: Registering");
   try {
-    const db = await import("./lib/db");
+    const db = await import("./src/lib/db");
     await db.ensureInitialized();
   } catch (error) {
     console.error("Instrumentation: Failed to initialize database:", error);
