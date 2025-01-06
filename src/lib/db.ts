@@ -9,6 +9,117 @@ const sql = neon(DATABASE_URL);
 
 const logPrefix = "[DB]";
 
+let isInitialized = false;
+
+/**
+ * Checks if the database is initialized by checking if the tables exist
+ * @returns Promise that resolves to true if the database is initialized, false otherwise
+ * @throws Error if checking database initialization fails
+ */
+export async function isDatabaseInitialized() {
+  console.log(`${logPrefix} Checking if database is initialized`);
+  if (isInitialized) return true;
+
+  try {
+    const [result] = await sql`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'spots'
+      ) AND EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'users'
+      ) AND EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'users_spots'
+      ) as initialized;
+    `;
+    isInitialized = result.initialized;
+    console.log(
+      `${logPrefix} Database initialization check complete:`,
+      result.initialized
+    );
+    return isInitialized;
+  } catch (error) {
+    console.error(
+      `${logPrefix} Error checking database initialization:`,
+      error
+    );
+    throw new Error("Failed to check database initialization status");
+  }
+}
+
+/**
+ * Initializes the database schema and creates required tables
+ * Creates:
+ * - spots table for spots
+ * - users table with role-based access
+ * - users_spots table for spot reservations
+ * Also creates necessary indexes and inserts the owner user
+ * @throws Error if database initialization fails
+ */
+export async function initializeDatabase() {
+  // Create spots table
+  await sql`
+    CREATE TABLE IF NOT EXISTS spots (
+      id character varying(255) NOT NULL,
+      created_at timestamp without time zone NOT NULL DEFAULT now(),
+      CONSTRAINT spots_pkey PRIMARY KEY (id)
+    );
+  `;
+
+  // Create users table with role column
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      email character varying(255) NOT NULL,
+      created_at timestamp without time zone NOT NULL DEFAULT now(),
+      name character varying(255) NOT NULL,
+      role character varying(50) NOT NULL DEFAULT 'user',
+      CONSTRAINT users_pkey PRIMARY KEY (email)
+    );
+  `;
+
+  // Create users_spots table with foreign key constraints
+  await sql`
+    CREATE TABLE IF NOT EXISTS users_spots (
+      user_email character varying(255) NOT NULL,
+      spot_id character varying(255) NOT NULL,
+      start_time timestamp without time zone NOT NULL,
+      end_time timestamp without time zone NULL,
+      CONSTRAINT users_spots_pkey PRIMARY KEY (spot_id, start_time, user_email),
+      CONSTRAINT fk_user FOREIGN KEY (user_email) 
+        REFERENCES users(email) ON DELETE CASCADE ON UPDATE RESTRICT,
+      CONSTRAINT fk_spot FOREIGN KEY (spot_id)
+        REFERENCES spots(id) ON DELETE CASCADE ON UPDATE RESTRICT
+    );
+  `;
+
+  // Add index for time range queries
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_users_spots_time_range 
+    ON users_spots(start_time, end_time);
+  `;
+
+  isInitialized = true;
+}
+
+/**
+ * Ensures database is initialized. Should be called during app startup.
+ * Safe to call multiple times - will only initialize once.
+ */
+export async function ensureInitialized() {
+  if (await isDatabaseInitialized()) return;
+
+  console.log(`${logPrefix} Initializing database...`);
+  try {
+    console.log(`${logPrefix} Database is not initialized, initializing...`);
+    await initializeDatabase();
+    console.log(`${logPrefix} Database initialized successfully`);
+  } catch (error) {
+    console.error(`${logPrefix} Failed to initialize database:`, error);
+    throw error;
+  }
+}
+
 /**
  * Creates a new user in the system
  * @param email User's email address (unique identifier)
@@ -120,6 +231,23 @@ export async function getUsers(): Promise<User[]> {
 }
 
 /**
+ * Checks if there are any users in the system
+ * @returns Promise that resolves to true if there are users, false if empty
+ * @throws Error if checking users fails
+ */
+export async function hasUsers(): Promise<boolean> {
+  try {
+    const [result] = await sql`
+      SELECT EXISTS(SELECT 1 FROM users LIMIT 1) as has_users;
+    `;
+    return result.has_users;
+  } catch (error) {
+    console.error("Error checking if users exist:", error);
+    throw new Error("Failed to check if users exist");
+  }
+}
+
+/**
  * Retrieves a specific user by their email
  * @param email User's email address
  * @returns The user object if found, undefined otherwise
@@ -208,58 +336,6 @@ export async function getSpotStatus(
     });
     throw new Error("Failed to fetch spot status");
   }
-}
-
-/**
- * Initializes the database schema and creates required tables
- * Creates:
- * - spots table for spots
- * - users table with role-based access
- * - users_spots table for spot reservations
- * Also creates necessary indexes and inserts the owner user
- * @throws Error if database initialization fails
- */
-export async function initializeDatabase() {
-  // Create spots table
-  await sql`
-    CREATE TABLE IF NOT EXISTS spots (
-      id character varying(255) NOT NULL,
-      created_at timestamp without time zone NOT NULL DEFAULT now(),
-      CONSTRAINT spots_pkey PRIMARY KEY (id)
-    );
-  `;
-
-  // Create users table with role column
-  await sql`
-    CREATE TABLE IF NOT EXISTS users (
-      email character varying(255) NOT NULL,
-      created_at timestamp without time zone NOT NULL DEFAULT now(),
-      name character varying(255) NOT NULL,
-      role character varying(50) NOT NULL DEFAULT 'user',
-      CONSTRAINT users_pkey PRIMARY KEY (email)
-    );
-  `;
-
-  // Create users_spots table with foreign key constraints
-  await sql`
-    CREATE TABLE IF NOT EXISTS users_spots (
-      user_email character varying(255) NOT NULL,
-      spot_id character varying(255) NOT NULL,
-      start_time timestamp without time zone NOT NULL,
-      end_time timestamp without time zone NULL,
-      CONSTRAINT users_spots_pkey PRIMARY KEY (spot_id, start_time, user_email),
-      CONSTRAINT fk_user FOREIGN KEY (user_email) 
-        REFERENCES users(email) ON DELETE CASCADE ON UPDATE RESTRICT,
-      CONSTRAINT fk_spot FOREIGN KEY (spot_id)
-        REFERENCES spots(id) ON DELETE CASCADE ON UPDATE RESTRICT
-    );
-  `;
-
-  // Add index for time range queries
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_users_spots_time_range 
-    ON users_spots(start_time, end_time);
-  `;
 }
 
 /**

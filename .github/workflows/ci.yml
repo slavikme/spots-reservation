@@ -7,9 +7,16 @@ on:
   pull_request:
     branches: [main, dev]
 
+# Add default permissions at workflow level (most restrictive)
+permissions:
+  contents: read
+
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    # This job only needs read permissions
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -34,15 +41,31 @@ jobs:
         if: success()
         run: npm run build
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    # Deploy job needs write permissions for deployments
+    permissions:
+      contents: read
+      deployments: write
+    if: success() && (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev'))
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
       - name: Deploy to Vercel
-        if: success() && (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev'))
         continue-on-error: true
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          npm install --global vercel
           if [[ ${{ github.event_name }} == 'push' && ${{ github.ref }} == 'refs/heads/main' ]]; then
             env="production"
             env_opt="--prod"
@@ -52,6 +75,6 @@ jobs:
             env="preview"
           fi
           token_opt="--token=$VERCEL_TOKEN"
-          vercel pull --yes --environment=$env $token_opt
-          vercel build $env_opt $token_opt
-          vercel deploy $env_opt $token_opt
+          npx vercel pull --yes --environment=$env $token_opt
+          npx vercel build $env_opt $token_opt
+          npx vercel deploy $env_opt $token_opt --prebuilt
