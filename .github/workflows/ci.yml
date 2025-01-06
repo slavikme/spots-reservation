@@ -42,6 +42,7 @@ jobs:
           path: |
             .next
             public
+            node_modules
 
   deploy:
     runs-on: ubuntu-latest
@@ -81,4 +82,5 @@ jobs:
           fi
           token_opt="--token=$VERCEL_TOKEN"
           npx vercel pull --yes --environment=$env $token_opt
+          NEXT_TELEMETRY_DISABLED=1 npx vercel build $env_opt $token_opt --cwd .
           npx vercel deploy $env_opt $token_opt --prebuilt
