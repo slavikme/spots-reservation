@@ -1,4 +1,5 @@
 import * as db from "@/lib/db";
+import { AUTH0_BASE_URL } from "@/lib/env";
 import {
   handleAuth,
   handleCallback,
@@ -10,13 +11,13 @@ import { NextApiRequest, NextApiResponse } from "next";
 
 export const GET = handleAuth({
   login: handleLogin({
-    returnTo: process.env.AUTH0_BASE_URL,
+    returnTo: AUTH0_BASE_URL,
     authorizationParams: {
       prompt: "login",
     },
   }),
   logout: handleLogout({
-    returnTo: process.env.AUTH0_BASE_URL,
+    returnTo: AUTH0_BASE_URL,
   }),
   callback: handleCallback({
     afterCallback: async (
