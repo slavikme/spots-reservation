@@ -19,7 +19,7 @@ export const AUTH0_BASE_URL =
   // Use custom environment variable if set
   process.env.AUTH0_BASE_URL ||
   // If running in Vercel, use the VERCEL_URL environment variable
-  (process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`) ||
+  process.env.VERCEL_URL ||
   // Otherwise, fallback to local environment
   "http://localhost:3001";
 
