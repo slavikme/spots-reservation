@@ -22,7 +22,27 @@ export async function GET() {
     }
 
     console.log("[API] Fetching user data for:", session.user.email);
-    const user = await db.getUser(session.user.email);
+    let user;
+    try {
+      user = await db.getUser(session.user.email);
+    } catch (error) {
+      // Check if database needs initialization since this could be a fresh database
+      // If not initialized, we'll initialize it and retry the user fetch
+
+      if (await db.isDatabaseInitialized()) {
+        // If the database is initialized, then something went wrong while fetching the user
+        console.error("[API] Failed to fetch user:", error);
+        return NextResponse.json(
+          { error: "Failed to fetch user" },
+          { status: 500 }
+        );
+      }
+
+      // It seems like the database is not initialized, so we'll initialize it and retry the user fetch
+      console.log("[API] Database not initialized");
+      await db.ensureInitialized();
+      user = await db.getUser(session.user.email);
+    }
 
     if (!user) {
       console.log(
