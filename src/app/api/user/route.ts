@@ -1,6 +1,9 @@
 import auth0 from "@/lib/auth0";
 import * as db from "@/lib/db";
+import { logger } from "@/lib/log";
 import { NextResponse } from "next/server";
+
+const log = logger("[API]");
 
 export const dynamic = "force-dynamic";
 
@@ -14,24 +17,24 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    console.log("[API] Getting session user");
-    const session = await auth0.getSession();
+    const session = await log.measure("Getting session user", auth0.getSession);
     if (!session?.user) {
-      console.warn("[API] Unauthorized access attempt - no session user");
+      log.warn("Unauthorized access attempt - no session user");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    console.log("[API] Fetching user data for:", session.user.email);
     let user;
     try {
+      log(`Fetching user data for: ${session.user.email}`);
       user = await db.getUser(session.user.email);
     } catch (error) {
-      // Check if database needs initialization since this could be a fresh database
-      // If not initialized, we'll initialize it and retry the user fetch
-
+      // Verify database initialization status - may need setup if this is first run
+      // Will initialize database and attempt user fetch again if needed.
+      // This check located here because this API route is the first one that is called
+      // involving DB operations
       if (await db.isDatabaseInitialized()) {
         // If the database is initialized, then something went wrong while fetching the user
-        console.error("[API] Failed to fetch user:", error);
+        log.error("Failed to fetch user", error);
         return NextResponse.json(
           { error: "Failed to fetch user" },
           { status: 500 }
@@ -39,33 +42,29 @@ export async function GET() {
       }
 
       // It seems like the database is not initialized, so we'll initialize it and retry the user fetch
-      console.log("[API] Database not initialized");
+      log.warn("Database not initialized");
       await db.ensureInitialized();
-      user = await db.getUser(session.user.email);
     }
 
     if (!user) {
-      console.log(
-        "[API] User not found in database, creating new user:",
-        session.user.email
-      );
-      // If this is the first user, make them an owner
-      const isFirstUser = !(await db.hasUsers());
-      if (isFirstUser) {
-        console.log("[API] First user detected, creating owner account");
+      log.warn("User not found in database");
+      log(`Checking if there are any users in the database`);
+      const hasAnyUsers = await db.hasUsers();
+      if (!hasAnyUsers) {
+        log("No users exist in database yet");
       }
-      const newUser = await db.insertUser(
-        session.user.email,
-        session.user.name || session.user.email,
-        isFirstUser ? "owner" : "user"
-      );
+      // If this is the first user, make them an owner
+      const role = !hasAnyUsers ? "owner" : "user";
+      const name = session.user.name || session.user.email;
+      log(`Inserting ${role} account into database`);
+      const newUser = await db.insertUser(session.user.email, name, role);
       return NextResponse.json(newUser);
     }
 
-    console.log("[API] Successfully retrieved user data");
+    log("Successfully retrieved user data");
     return NextResponse.json(user);
   } catch (error) {
-    console.error("[API] Error getting user:", error);
+    log.error("Error getting user", error);
     return NextResponse.json(
       { error: "Error retrieving user data" },
       { status: 500 }

@@ -3,11 +3,13 @@
 import { Assignment, Spot, SpotStatus, User } from "@/types/db.types";
 import { neon } from "@neondatabase/serverless";
 import { DATABASE_URL } from "./env";
+import { logger } from "./log";
+
+// Create a scoped logger for database operations
+const log = logger("[DB]");
 
 // Create a singleton SQL client
 const sql = neon(DATABASE_URL);
-
-const logPrefix = "[DB]";
 
 let isInitialized = false;
 
@@ -17,34 +19,36 @@ let isInitialized = false;
  * @throws Error if checking database initialization fails
  */
 export async function isDatabaseInitialized() {
-  console.log(`${logPrefix} Checking if database is initialized`);
   if (isInitialized) return true;
 
   try {
-    const [result] = await sql`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_name = 'spots'
-      ) AND EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_name = 'users'
-      ) AND EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_name = 'users_spots'
-      ) as initialized;
-    `;
-    isInitialized = result.initialized;
-    console.log(
-      `${logPrefix} Database initialization check complete:`,
-      result.initialized
+    const [result] = await log.measure(
+      "Checking if database is initialized",
+      () => sql`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_name = 'spots'
+        ) AND EXISTS (
+          SELECT FROM information_schema.tables
+          WHERE table_name = 'users'
+        ) AND EXISTS (
+          SELECT FROM information_schema.tables
+          WHERE table_name = 'users_spots'
+        ) as initialized;
+      `
     );
+    isInitialized = result.initialized;
+    if (isInitialized) {
+      log("Database is initialized");
+    } else {
+      log.warn("Database is not initialized");
+    }
     return isInitialized;
   } catch (error) {
-    console.error(
-      `${logPrefix} Error checking database initialization:`,
-      error
-    );
-    throw new Error("Failed to check database initialization status");
+    log.error("Error checking database initialization", error);
+    throw new Error("Failed to check database initialization status", {
+      cause: error,
+    });
   }
 }
 
@@ -59,45 +63,57 @@ export async function isDatabaseInitialized() {
  */
 export async function initializeDatabase() {
   // Create spots table
-  await sql`
-    CREATE TABLE IF NOT EXISTS spots (
-      id character varying(255) NOT NULL,
-      created_at timestamp without time zone NOT NULL DEFAULT now(),
-      CONSTRAINT spots_pkey PRIMARY KEY (id)
-    );
-  `;
+  await log.measure(
+    "Creating spots table",
+    () => sql`
+      CREATE TABLE IF NOT EXISTS spots (
+        id character varying(255) NOT NULL,
+        created_at timestamp without time zone NOT NULL DEFAULT now(),
+        CONSTRAINT spots_pkey PRIMARY KEY (id)
+      );
+    `
+  );
 
   // Create users table with role column
-  await sql`
-    CREATE TABLE IF NOT EXISTS users (
-      email character varying(255) NOT NULL,
-      created_at timestamp without time zone NOT NULL DEFAULT now(),
-      name character varying(255) NOT NULL,
-      role character varying(50) NOT NULL DEFAULT 'user',
-      CONSTRAINT users_pkey PRIMARY KEY (email)
-    );
-  `;
+  await log.measure(
+    "Creating users table",
+    () => sql`
+      CREATE TABLE IF NOT EXISTS users (
+        email character varying(255) NOT NULL,
+        created_at timestamp without time zone NOT NULL DEFAULT now(),
+        name character varying(255) NOT NULL,
+        role character varying(50) NOT NULL DEFAULT 'user',
+        CONSTRAINT users_pkey PRIMARY KEY (email)
+      );
+    `
+  );
 
   // Create users_spots table with foreign key constraints
-  await sql`
-    CREATE TABLE IF NOT EXISTS users_spots (
-      user_email character varying(255) NOT NULL,
-      spot_id character varying(255) NOT NULL,
-      start_time timestamp without time zone NOT NULL,
-      end_time timestamp without time zone NULL,
-      CONSTRAINT users_spots_pkey PRIMARY KEY (spot_id, start_time, user_email),
-      CONSTRAINT fk_user FOREIGN KEY (user_email) 
-        REFERENCES users(email) ON DELETE CASCADE ON UPDATE RESTRICT,
-      CONSTRAINT fk_spot FOREIGN KEY (spot_id)
-        REFERENCES spots(id) ON DELETE CASCADE ON UPDATE RESTRICT
-    );
-  `;
+  await log.measure(
+    "Creating users_spots table",
+    () => sql`
+      CREATE TABLE IF NOT EXISTS users_spots (
+        user_email character varying(255) NOT NULL,
+        spot_id character varying(255) NOT NULL,
+        start_time timestamp without time zone NOT NULL,
+        end_time timestamp without time zone NULL,
+        CONSTRAINT users_spots_pkey PRIMARY KEY (spot_id, start_time, user_email),
+        CONSTRAINT fk_user FOREIGN KEY (user_email) 
+          REFERENCES users(email) ON DELETE CASCADE ON UPDATE RESTRICT,
+        CONSTRAINT fk_spot FOREIGN KEY (spot_id)
+          REFERENCES spots(id) ON DELETE CASCADE ON UPDATE RESTRICT
+      );
+    `
+  );
 
   // Add index for time range queries
-  await sql`
-    CREATE INDEX IF NOT EXISTS idx_users_spots_time_range 
-    ON users_spots(start_time, end_time);
-  `;
+  await log.measure(
+    "Creating users_spots index",
+    () => sql`  
+      CREATE INDEX IF NOT EXISTS idx_users_spots_time_range 
+      ON users_spots(start_time, end_time);
+    `
+  );
 
   isInitialized = true;
 }
@@ -109,13 +125,12 @@ export async function initializeDatabase() {
 export async function ensureInitialized() {
   if (await isDatabaseInitialized()) return;
 
-  console.log(`${logPrefix} Initializing database...`);
+  log("Initializing database");
   try {
-    console.log(`${logPrefix} Database is not initialized, initializing...`);
     await initializeDatabase();
-    console.log(`${logPrefix} Database initialized successfully`);
+    log("Database initialized successfully");
   } catch (error) {
-    console.error(`${logPrefix} Failed to initialize database:`, error);
+    log.error("Failed to initialize database", error);
     throw error;
   }
 }
@@ -133,23 +148,19 @@ export async function insertUser(
   name: string,
   role: "user" | "admin" | "owner" = "user"
 ): Promise<User> {
-  console.log(`${logPrefix} Inserting user:`, { email, name, role });
   try {
-    const [user] = (await sql`
-      INSERT INTO users (email, name, role)
-      VALUES (${email}, ${name}, ${role})
-      RETURNING email, name, role, created_at;
-    `) as User[];
-    console.info(`${logPrefix} Successfully inserted user:`, user);
+    const [user] = (await log.measure(
+      `Inserting user ${email}, ${name}, ${role}`,
+      () => sql`
+        INSERT INTO users (email, name, role)
+        VALUES (${email}, ${name}, ${role})
+        RETURNING email, name, role, created_at;
+      `
+    )) as User[];
     return user;
   } catch (error) {
-    console.error(`${logPrefix} Error inserting user:`, {
-      error,
-      email,
-      name,
-      role,
-    });
-    throw new Error("Failed to insert user");
+    log.error("Error inserting user", error);
+    throw new Error("Failed to insert user", { cause: error });
   }
 }
 
@@ -160,18 +171,19 @@ export async function insertUser(
  * @throws Error if spot creation fails
  */
 export async function insertSpot(id: string): Promise<Spot> {
-  console.log(`${logPrefix} Inserting spot:`, { id });
   try {
-    const [spot] = (await sql`
-      INSERT INTO spots (id)
-      VALUES (${id})
-      RETURNING id, created_at;
-    `) as Spot[];
-    console.info(`${logPrefix} Successfully inserted spot:`, spot);
+    const [spot] = (await log.measure(
+      `Inserting spot ${id}`,
+      () => sql`
+        INSERT INTO spots (id)
+        VALUES (${id})
+        RETURNING id, created_at;
+      `
+    )) as Spot[];
     return spot;
   } catch (error) {
-    console.error(`${logPrefix} Error inserting spot:`, { error, id });
-    throw new Error("Failed to insert spot");
+    log.error("Error inserting spot", error);
+    throw new Error("Failed to insert spot", { cause: error });
   }
 }
 
@@ -181,16 +193,17 @@ export async function insertSpot(id: string): Promise<Spot> {
  * @throws Error if spot deletion fails
  */
 export async function deleteSpot(id: string): Promise<void> {
-  console.log(`${logPrefix} Deleting spot:`, { id });
   try {
-    await sql`
-      DELETE FROM spots 
-      WHERE id = ${id};
-    `;
-    console.info(`${logPrefix} Successfully deleted spot:`, { id });
+    await log.measure(
+      `Deleting spot ${id}`,
+      () => sql`
+        DELETE FROM spots 
+        WHERE id = ${id};
+      `
+    );
   } catch (error) {
-    console.error(`${logPrefix} Error deleting spot:`, { error, id });
-    throw new Error("Failed to delete spot");
+    log.error("Error deleting spot", error);
+    throw new Error("Failed to delete spot", { cause: error });
   }
 }
 
@@ -201,13 +214,16 @@ export async function deleteSpot(id: string): Promise<void> {
  */
 export async function deleteUser(email: string): Promise<void> {
   try {
-    await sql`
-      DELETE FROM users 
-      WHERE email = ${email};
-    `;
+    await log.measure(
+      `Deleting user ${email}`,
+      () => sql`
+        DELETE FROM users 
+        WHERE email = ${email};
+      `
+    );
   } catch (error) {
-    console.error("Error deleting user:", error);
-    throw new Error("Failed to delete user");
+    log.error("Error deleting user", error);
+    throw new Error("Failed to delete user", { cause: error });
   }
 }
 
@@ -218,15 +234,18 @@ export async function deleteUser(email: string): Promise<void> {
  */
 export async function getUsers(): Promise<User[]> {
   try {
-    const users = (await sql`
-      SELECT email, name, role, created_at 
-      FROM users
-      ORDER BY created_at DESC;
-    `) as User[];
+    const users = (await log.measure(
+      "Fetching users",
+      () => sql`
+        SELECT email, name, role, created_at 
+        FROM users
+        ORDER BY created_at DESC;
+      `
+    )) as User[];
     return users;
   } catch (error) {
-    console.error("Error fetching users:", error);
-    throw new Error("Failed to fetch users");
+    log.error("Error fetching users", error);
+    throw new Error("Failed to fetch users", { cause: error });
   }
 }
 
@@ -237,13 +256,16 @@ export async function getUsers(): Promise<User[]> {
  */
 export async function hasUsers(): Promise<boolean> {
   try {
-    const [result] = await sql`
-      SELECT EXISTS(SELECT 1 FROM users LIMIT 1) as has_users;
-    `;
+    const [result] = await log.measure(
+      "Checking if users exist",
+      () => sql`
+        SELECT EXISTS(SELECT 1 FROM users LIMIT 1) as has_users;
+      `
+    );
     return result.has_users;
   } catch (error) {
-    console.error("Error checking if users exist:", error);
-    throw new Error("Failed to check if users exist");
+    log.error("Error checking if users exist", error);
+    throw new Error("Failed to check if users exist", { cause: error });
   }
 }
 
@@ -255,16 +277,19 @@ export async function hasUsers(): Promise<boolean> {
  */
 export async function getUser(email: string): Promise<User | undefined> {
   try {
-    const [user] = (await sql`
-      SELECT email, name, role, created_at
-      FROM users 
-      WHERE email = ${email}
-      LIMIT 1;
-    `) as User[];
+    const [user] = (await log.measure(
+      `Fetching user ${email}`,
+      () => sql`
+        SELECT email, name, role, created_at
+        FROM users 
+        WHERE email = ${email}
+        LIMIT 1;
+      `
+    )) as User[];
     return user;
   } catch (error) {
-    console.error("Error fetching user by email:", error);
-    throw new Error("Failed to fetch user");
+    log.error("Error fetching user by email", error);
+    throw new Error("Failed to fetch user", { cause: error });
   }
 }
 
@@ -275,15 +300,18 @@ export async function getUser(email: string): Promise<User | undefined> {
  */
 export async function getSpots(): Promise<Spot[]> {
   try {
-    const spots = (await sql`
-      SELECT id, created_at
-      FROM spots
-      ORDER BY id ASC;
-    `) as Spot[];
+    const spots = (await log.measure(
+      "Fetching spots",
+      () => sql`
+        SELECT id, created_at
+        FROM spots
+        ORDER BY id ASC;
+      `
+    )) as Spot[];
     return spots;
   } catch (error) {
-    console.error("Error fetching spots:", error);
-    throw new Error("Failed to fetch spots");
+    log.error("Error fetching spots", error);
+    throw new Error("Failed to fetch spots", { cause: error });
   }
 }
 
@@ -296,45 +324,41 @@ export async function getSpots(): Promise<Spot[]> {
 export async function getSpotStatus(
   timestamp_ms: number
 ): Promise<SpotStatus[]> {
-  console.log(`${logPrefix} Fetching spot status for timestamp:`, {
-    timestamp_ms,
-  });
   try {
     const timestamp = new Date(timestamp_ms);
-    const spots_status = (await sql`
-      WITH spot_assignments AS (
-        SELECT 
-          s.id as spot_id,
-          u.name as user_name,
-          us.start_time,
-          us.end_time,
-          CASE WHEN us.end_time IS NOT NULL THEN 1 ELSE 0 END as has_end_time
-        FROM spots s
-        LEFT JOIN users_spots us ON s.id = us.spot_id
-        LEFT JOIN users u ON us.user_email = u.email
-        WHERE 
-          us.start_time <= ${timestamp} AND 
-          (us.end_time IS NULL OR us.end_time > ${timestamp})
-      )
-      SELECT DISTINCT ON (spot_id)
-        spot_id,
-        user_name,
-        start_time,
-        end_time
-      FROM spot_assignments
-      ORDER BY spot_id ASC, has_end_time DESC, start_time DESC;
-    `) as SpotStatus[];
-    console.info(`${logPrefix} Successfully fetched spot status:`, {
-      timestamp_ms,
-      spotsCount: spots_status.length,
-    });
+    const spots_status = (await log.measure(
+      `Fetching spot status for timestamp ${timestamp_ms}`,
+      () => sql`
+        WITH spot_assignments AS (
+          SELECT 
+            s.id as spot_id,
+            u.name as user_name,
+            us.start_time,
+            us.end_time,
+            CASE WHEN us.end_time IS NOT NULL THEN 1 ELSE 0 END as has_end_time
+          FROM spots s
+          LEFT JOIN users_spots us ON s.id = us.spot_id
+          LEFT JOIN users u ON us.user_email = u.email
+          WHERE 
+            us.start_time <= ${timestamp} AND 
+            (us.end_time IS NULL OR us.end_time > ${timestamp})
+        )
+        SELECT DISTINCT ON (spot_id)
+          spot_id,
+          user_name,
+          start_time,
+          end_time
+        FROM spot_assignments
+        ORDER BY spot_id ASC, has_end_time DESC, start_time DESC;
+      `
+    )) as SpotStatus[];
+    log(
+      `Fetched spot status for timestamp ${timestamp_ms} with ${spots_status.length} spots`
+    );
     return spots_status;
   } catch (error) {
-    console.error(`${logPrefix} Error fetching spot status:`, {
-      error,
-      timestamp_ms,
-    });
-    throw new Error("Failed to fetch spot status");
+    log.error("Error fetching spot status", error);
+    throw new Error("Failed to fetch spot status", { cause: error });
   }
 }
 
@@ -351,13 +375,16 @@ async function getOverlappingAssignments(
   startTime: Date,
   endTime: Date | null
 ) {
-  return await sql`
-    SELECT user_email, start_time, end_time
-    FROM users_spots
-    WHERE spot_id = ${spotId}
-      AND start_time < ${endTime || "9999-12-31"}
-      AND (end_time > ${startTime} OR end_time IS NULL);
-  `;
+  return await log.measure(
+    `Fetching overlapping assignments for spot ${spotId}`,
+    () => sql`
+      SELECT user_email, start_time, end_time
+      FROM users_spots
+      WHERE spot_id = ${spotId}
+        AND start_time < ${endTime || "9999-12-31"}
+        AND (end_time > ${startTime} OR end_time IS NULL);
+    `
+  );
 }
 
 /**
@@ -374,12 +401,9 @@ export async function assignSpotWithEndTime(
   startTime: Date,
   endTime: Date
 ): Promise<void> {
-  console.log(`${logPrefix} Assigning spot with end time:`, {
-    userEmail,
-    spotId,
-    startTime,
-    endTime,
-  });
+  log(
+    `Assigning spot with end time. email: ${userEmail}, spot: ${spotId}, start: ${startTime}, end: ${endTime}`
+  );
   try {
     // Validate input
     if (startTime >= endTime) {
@@ -393,34 +417,22 @@ export async function assignSpotWithEndTime(
     );
 
     if (overlapping.length > 0) {
-      console.warn(`${logPrefix} Found overlapping assignments:`, overlapping);
+      log.warn(`Found overlapping assignments: ${overlapping}`);
       throw new Error(
         "Spot is already reserved during the requested time period"
       );
     }
 
     // Insert the new assignment
-    await sql`
-      INSERT INTO users_spots (user_email, spot_id, start_time, end_time)
-      VALUES (${userEmail}, ${spotId}, ${startTime}, ${endTime});
-    `;
-    console.info(`${logPrefix} Successfully assigned spot with end time:`, {
-      userEmail,
-      spotId,
-      startTime,
-      endTime,
-    });
+    await log.measure(
+      `Inserting new assignment for spot ${spotId}`,
+      () => sql`
+        INSERT INTO users_spots (user_email, spot_id, start_time, end_time)
+        VALUES (${userEmail}, ${spotId}, ${startTime}, ${endTime});
+      `
+    );
   } catch (error) {
-    console.error(`${logPrefix} Error assigning spot with end time:`, {
-      error,
-      userEmail,
-      spotId,
-      startTime,
-      endTime,
-    });
-    if (error instanceof Error) {
-      throw error;
-    }
+    log.error("Error assigning spot with end time", error);
     throw new Error("Failed to assign spot", { cause: error });
   }
 }
@@ -442,11 +454,9 @@ export async function assignSpotInfinite(
   spotId: string,
   startTime: Date
 ): Promise<void> {
-  console.log(`${logPrefix} Assigning spot infinitely:`, {
-    userEmail,
-    spotId,
-    startTime,
-  });
+  log(
+    `Assigning spot infinitely. email: ${userEmail}, spot: ${spotId}, start: ${startTime}`
+  );
   try {
     const overlapping = await getOverlappingAssignments(
       spotId,
@@ -455,7 +465,7 @@ export async function assignSpotInfinite(
     );
 
     if (overlapping.length > 0) {
-      console.log(`${logPrefix} Found overlapping assignments:`, overlapping);
+      log(`Found overlapping assignments: ${overlapping}`);
       // Find the latest end time among finite reservations
       const finiteReservations = overlapping.filter((a) => a.end_time !== null);
 
@@ -473,37 +483,33 @@ export async function assignSpotInfinite(
       );
       if (existingInfiniteReservation) {
         // Update the existing infinite reservation to end at our start time
-        await sql`
-          UPDATE users_spots
-          SET end_time = ${startTime}
-          WHERE spot_id = ${spotId}
-            AND user_email = ${existingInfiniteReservation.user_email}
-            AND start_time = ${existingInfiniteReservation.start_time}
-            AND end_time IS NULL;
-        `;
+        await log.measure(
+          `Updating existing infinite reservation for spot ${spotId}`,
+          () => sql`
+            UPDATE users_spots
+            SET end_time = ${startTime}
+            WHERE spot_id = ${spotId}
+              AND user_email = ${existingInfiniteReservation.user_email}
+              AND start_time = ${existingInfiniteReservation.start_time}
+              AND end_time IS NULL;
+          `
+        );
       }
     }
 
     // No overlapping reservations, insert with current start time
-    await sql`
-      INSERT INTO users_spots (user_email, spot_id, start_time, end_time)
-      VALUES (${userEmail}, ${spotId}, ${startTime}, NULL);
-    `;
-    console.info(`${logPrefix} Successfully assigned spot infinitely:`, {
-      userEmail,
-      spotId,
-      startTime,
-    });
+    await log.measure(
+      `Inserting new infinite reservation for spot ${spotId}`,
+      () => sql`
+        INSERT INTO users_spots (user_email, spot_id, start_time, end_time)
+        VALUES (${userEmail}, ${spotId}, ${startTime}, NULL);
+      `
+    );
+    log(
+      `Successfully assigned spot infinitely. email: ${userEmail}, spot: ${spotId}, start: ${startTime}`
+    );
   } catch (error) {
-    console.error(`${logPrefix} Error assigning spot infinitely:`, {
-      error,
-      userEmail,
-      spotId,
-      startTime,
-    });
-    if (error instanceof Error) {
-      throw error;
-    }
+    log.error("Error assigning spot infinitely", error);
     throw new Error("Failed to assign spot", { cause: error });
   }
 }
@@ -516,9 +522,12 @@ async function validateReleaseAuthorization(
   requestingUserEmail: string,
   overlappingAssignments: Assignment[]
 ): Promise<void> {
-  const [user] = (await sql`
-    SELECT role FROM users WHERE email = ${requestingUserEmail}
-  `) as { role: string }[];
+  const [user] = (await log.measure(
+    `Fetching user ${requestingUserEmail}`,
+    () => sql`
+      SELECT role FROM users WHERE email = ${requestingUserEmail}
+    `
+  )) as { role: string }[];
 
   if (!user) {
     throw new Error("User not found");
@@ -636,12 +645,15 @@ async function deleteFiniteAssignment(
   assignment: Assignment,
   spotId: string
 ): Promise<void> {
-  await sql`
-    DELETE FROM users_spots
-    WHERE spot_id = ${spotId}
-      AND user_email = ${assignment.user_email}
-      AND start_time = ${assignment.start_time};
-  `;
+  await log.measure(
+    `Deleting finite assignment for spot ${spotId}`,
+    () => sql`
+      DELETE FROM users_spots
+      WHERE spot_id = ${spotId}
+        AND user_email = ${assignment.user_email}
+        AND start_time = ${assignment.start_time};
+    `
+  );
 }
 
 async function splitAssignment(
@@ -650,23 +662,29 @@ async function splitAssignment(
   startTime: Date,
   endTime: Date
 ): Promise<void> {
-  await sql`
-    UPDATE users_spots
-    SET end_time = ${startTime}
-    WHERE spot_id = ${spotId}
-      AND user_email = ${assignment.user_email}
-      AND start_time = ${assignment.start_time};
-  `;
+  await log.measure(
+    `Splitting assignment for spot ${spotId}`,
+    () => sql`
+      UPDATE users_spots
+      SET end_time = ${startTime}
+      WHERE spot_id = ${spotId}
+        AND user_email = ${assignment.user_email}
+        AND start_time = ${assignment.start_time};
+    `
+  );
 
-  await sql`
-    INSERT INTO users_spots (user_email, spot_id, start_time, end_time)
-    VALUES (
-      ${assignment.user_email},
-      ${spotId},
-      ${endTime},
-      ${assignment.end_time}
-    );
-  `;
+  await log.measure(
+    `Inserting new assignment for spot ${spotId}`,
+    () => sql`
+      INSERT INTO users_spots (user_email, spot_id, start_time, end_time)
+      VALUES (
+        ${assignment.user_email},
+        ${spotId},
+        ${endTime},
+        ${assignment.end_time}
+      );
+    `
+  );
 }
 
 async function updateAssignmentStartTime(
@@ -674,13 +692,16 @@ async function updateAssignmentStartTime(
   spotId: string,
   newStartTime: Date
 ): Promise<void> {
-  await sql`
-    UPDATE users_spots
-    SET start_time = ${newStartTime}
-    WHERE spot_id = ${spotId}
-      AND user_email = ${assignment.user_email}
-      AND start_time = ${assignment.start_time};
-  `;
+  await log.measure(
+    `Updating assignment start time for spot ${spotId}`,
+    () => sql`
+      UPDATE users_spots
+      SET start_time = ${newStartTime}
+      WHERE spot_id = ${spotId}
+        AND user_email = ${assignment.user_email}
+        AND start_time = ${assignment.start_time};
+    `
+  );
 }
 
 async function updateAssignmentEndTime(
@@ -688,13 +709,16 @@ async function updateAssignmentEndTime(
   spotId: string,
   newEndTime: Date
 ): Promise<void> {
-  await sql`
-    UPDATE users_spots
-    SET end_time = ${newEndTime}
-    WHERE spot_id = ${spotId}
-      AND user_email = ${assignment.user_email}
-      AND start_time = ${assignment.start_time};
-  `;
+  await log.measure(
+    `Updating assignment end time for spot ${spotId}`,
+    () => sql`
+      UPDATE users_spots
+      SET end_time = ${newEndTime}
+      WHERE spot_id = ${spotId}
+        AND user_email = ${assignment.user_email}
+        AND start_time = ${assignment.start_time};
+    `
+  );
 }
 
 async function updateInfiniteAssignmentStartTime(
@@ -702,14 +726,17 @@ async function updateInfiniteAssignmentStartTime(
   spotId: string,
   newStartTime: Date
 ): Promise<void> {
-  await sql`
-    UPDATE users_spots
-    SET start_time = ${newStartTime}
-    WHERE spot_id = ${spotId}
-      AND user_email = ${assignment.user_email}
-      AND start_time = ${assignment.start_time}
-      AND end_time IS NULL;
-  `;
+  await log.measure(
+    `Updating infinite assignment start time for spot ${spotId}`,
+    () => sql`
+      UPDATE users_spots
+      SET start_time = ${newStartTime}
+      WHERE spot_id = ${spotId}
+        AND user_email = ${assignment.user_email}
+        AND start_time = ${assignment.start_time}
+        AND end_time IS NULL;
+    `
+  );
 }
 
 /**
@@ -726,12 +753,9 @@ export async function releaseSpotReservation(
   startTime: Date,
   endTime: Date
 ): Promise<void> {
-  console.log(`${logPrefix} Releasing spot reservation:`, {
-    requestingUserEmail,
-    spotId,
-    startTime,
-    endTime,
-  });
+  log(
+    `Releasing spot reservation. email: ${requestingUserEmail}, spot: ${spotId}, start: ${startTime}, end: ${endTime}`
+  );
   try {
     // Validate input
     if (startTime >= endTime) {
@@ -739,16 +763,19 @@ export async function releaseSpotReservation(
     }
 
     // Get all overlapping reservations
-    const overlapping = (await sql`
-      SELECT user_email, start_time, end_time
-      FROM users_spots
-      WHERE spot_id = ${spotId}
-        AND start_time < ${endTime}
-        AND (end_time > ${startTime} OR end_time IS NULL)
-      ORDER BY start_time ASC;
-    `) as Assignment[];
+    const overlapping = (await log.measure(
+      `Fetching overlapping assignments for spot ${spotId}`,
+      () => sql`
+        SELECT user_email, start_time, end_time
+        FROM users_spots
+        WHERE spot_id = ${spotId}
+          AND start_time < ${endTime}
+          AND (end_time > ${startTime} OR end_time IS NULL)
+        ORDER BY start_time ASC;
+      `
+    )) as Assignment[];
 
-    console.log(`${logPrefix} Found overlapping assignments:`, overlapping);
+    log(`Found overlapping assignments: ${overlapping}`);
 
     // Validate user authorization
     await validateReleaseAuthorization(requestingUserEmail, overlapping);
@@ -763,24 +790,11 @@ export async function releaseSpotReservation(
       );
     }
 
-    console.info(`${logPrefix} Successfully released spot reservation:`, {
-      requestingUserEmail,
-      spotId,
-      startTime,
-      endTime,
-      overlappingCount: overlapping.length,
-    });
+    log(
+      `Successfully released spot reservation. Number of affected reservations: ${overlapping.length}`
+    );
   } catch (error) {
-    console.error(`${logPrefix} Error releasing spot reservation:`, {
-      error,
-      requestingUserEmail,
-      spotId,
-      startTime,
-      endTime,
-    });
-    if (error instanceof Error) {
-      throw error;
-    }
+    log.error("Error releasing spot reservation", error);
     throw new Error("Failed to release spot reservation", { cause: error });
   }
 }
